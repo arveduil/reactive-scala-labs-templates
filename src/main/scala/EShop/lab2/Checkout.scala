@@ -30,6 +30,9 @@ object Checkout {
 }
 
 class Checkout extends Actor {
+  import Checkout._
+  val system = akka.actor.ActorSystem("system")
+  import system.dispatcher
 
   private val scheduler = context.system.scheduler
   private val log       = Logging(context.system, this)
@@ -37,16 +40,49 @@ class Checkout extends Actor {
   val checkoutTimerDuration = 1 seconds
   val paymentTimerDuration  = 1 seconds
 
-  def receive: Receive = ???
+  private def scheduleCheckoutTimer: Cancellable = system.scheduler.scheduleOnce( checkoutTimerDuration, self, ExpireCheckout)
+  private def schedulePaymentTimer: Cancellable = system.scheduler.scheduleOnce( paymentTimerDuration, self, ExpirePayment)
 
-  def selectingDelivery(timer: Cancellable): Receive = ???
+  def receive: Receive = {
+    case StartCheckout => context become selectingDelivery(scheduleCheckoutTimer)
+  }
 
-  def selectingPaymentMethod(timer: Cancellable): Receive = ???
+  def selectingDelivery(timer: Cancellable): Receive = {
+    case ExpireCheckout | CancelCheckout =>
+      timer.cancel()
+      context become cancelled
 
-  def processingPayment(timer: Cancellable): Receive = ???
+    case SelectDeliveryMethod(_) =>
+      timer.cancel()
+      context become selectingPaymentMethod(scheduleCheckoutTimer)
+  }
 
-  def cancelled: Receive = ???
+  def selectingPaymentMethod(timer: Cancellable): Receive = {
+    case ExpireCheckout | CancelCheckout =>
+      timer.cancel()
+      context become cancelled
 
-  def closed: Receive = ???
+    case SelectPayment(_) =>
+      timer.cancel()
+      context become processingPayment(schedulePaymentTimer)
+  }
+
+  def processingPayment(timer: Cancellable): Receive = {
+    case ExpirePayment  | CancelCheckout =>
+      timer.cancel()
+      context become cancelled
+
+    case ReceivePayment =>
+      timer.cancel()
+      context become closed
+  }
+
+  def cancelled: Receive = {
+    case _ =>  context.stop(self)
+  }
+
+  def closed: Receive = {
+    case _ =>  context.stop(self)
+  }
 
 }
