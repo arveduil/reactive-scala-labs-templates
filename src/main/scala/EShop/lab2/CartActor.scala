@@ -2,8 +2,8 @@ package EShop.lab2
 
 import java.util.concurrent.TimeUnit
 
-import EShop.lab2.CartActor.AddItem
-
+import EShop.lab2.CartActor.{AddItem, GetItems}
+import EShop.lab2.Checkout.CheckOutClosed
 import akka.actor.{Actor, ActorRef, Cancellable, Props, Timers}
 import akka.event.{Logging, LoggingReceive}
 
@@ -48,6 +48,8 @@ val system = akka.actor.ActorSystem("system")
   def empty: Receive = LoggingReceive {
     case AddItem(item) =>
       context become nonEmpty(Cart(Seq(item)), scheduleTimer)
+    case GetItems =>
+      sender() ! Cart.empty
   }
 
   def nonEmpty(cart: Cart, timer: Cancellable): Receive = LoggingReceive {
@@ -64,12 +66,15 @@ val system = akka.actor.ActorSystem("system")
           timer.cancel()
           context become nonEmpty(cart.removeItem(item), scheduleTimer)
 
-    case StartCheckout =>
-       timer.cancel()
-      if (cart.isEmpty()) {
-        } else {
-          context become inCheckout(cart)
-        }
+    case StartCheckout =>{
+     // timer.cancel()
+      val checkoutRef = system.actorOf(Checkout.props(self), "checkoutActor")
+      checkoutRef ! Checkout.StartCheckout
+      sender() ! CartActor.CheckoutStarted(checkoutRef)
+      context become inCheckout(cart)
+    }
+    case GetItems =>
+      sender() ! cart
   }
 
   def inCheckout(cart: Cart): Receive = {
@@ -77,7 +82,11 @@ val system = akka.actor.ActorSystem("system")
       context become nonEmpty(cart,scheduleTimer)
 
     case CloseCheckout =>
+      context.parent ! CloseCheckout
+      context become empty
+
+    case CheckOutClosed =>
+      context.parent ! CloseCheckout
       context become empty
   }
-
 }
